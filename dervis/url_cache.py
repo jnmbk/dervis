@@ -30,7 +30,7 @@ def clear(url):
     if os.path.exists(file_name):
         os.remove(file_name)
 
-def _fetch(file_name):
+def _fetch(file_name, url):
     if not os.path.exists(cache_dir):
         os.mkdir(cache_dir)
     handle = open(file_name, 'w')
@@ -42,7 +42,7 @@ def urlopen(url):
     try:
         size = os.path.getsize(file_name)
         if size == 0:
-            _fetch(file_name)
+            _fetch(file_name, url)
     except OSError:
-        _fetch(file_name)
+        _fetch(file_name, url)
     return open(file_name, 'r')
