@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
+from multiprocessing import Pool
 import re
 from bs4 import BeautifulSoup
 import transitfeed
@@ -40,8 +41,8 @@ def _get_route_codes():
 def _get_stops(route_code):
     soup =  BeautifulSoup(url_cache.urlopen(_stop_url % route_code))
     return [(
-        i.title.string, i.description.string.split('aaa')[0],
-        i.find('geo:long').string, i.find('geo:lat').string) for i in soup.findAll("item")]
+        i.title.text, i.description.string.split('aaa')[0],
+        i.find('geo:long').text, i.find('geo:lat').text) for i in soup.findAll("item")]
 
 def _get_timetable(route_code):
     soup =  BeautifulSoup(url_cache.urlopen(_timetable_url % route_code))
@@ -114,9 +115,11 @@ def generate(filename):
     service_period.SetEndDate('20131231')
 
     route_codes = _get_route_codes()
+    pool = Pool()
+    stops_list = pool.map(_get_stops, route_codes)
+
     stop_cache = {}
-    for route_code in route_codes:
-        stops = _get_stops(route_code)
+    for route_code, stops in zip(route_codes, stops_list):
         for stop in stops:
             if not stop[1] in stop_cache.keys():
                 stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = schedule.AddStop(
