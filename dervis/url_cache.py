@@ -30,15 +30,19 @@ def clear(url):
     if os.path.exists(file_name):
         os.remove(file_name)
 
+def _fetch(file_name):
+    if not os.path.exists(cache_dir):
+        os.mkdir(cache_dir)
+    handle = open(file_name, 'w')
+    handle.write(requests.get(url).content)
+
 def urlopen(url):
     """fetches given url if not present in cache url content must be text"""
     file_name = get_cache_file_name(url)
     try:
-        handle = open(file_name, 'r')
-    except IOError:
-        if not os.path.exists(cache_dir):
-            os.mkdir(cache_dir)
-        handle = open(file_name, 'w')
-        handle.write(requests.get(url).content)
-        handle = open(file_name, 'r')
-    return handle
+        size = os.path.getsize(file_name)
+        if size == 0:
+            _fetch(file_name)
+    except OSError:
+        _fetch(file_name)
+    return open(file_name, 'r')
