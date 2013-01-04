@@ -48,9 +48,13 @@ def _get_timetable(route_code):
     soup =  BeautifulSoup(url_cache.urlopen(_timetable_url % route_code))
     try:
         name = soup.b.text
+        duration = [int(s) for s in soup.center.text.split() if s.isdigit()][-1]
     except AttributeError:
         name = ''
-    duration = [int(s) for s in soup.center.text.split() if s.isdigit()][-1]
+    except IndexError:
+        # iett has no duration defined for this route,
+        # probably there is no data as well
+        duration = "0"
 
     weekdays_g=[]
     weekdays_d=[]
@@ -100,7 +104,7 @@ def _get_stop_order(route_code):
         start = href.find('durak=')+6
         coming.append(href[start:href.find('&', start)])
 
-    route_name = soup.find("span", class_="kirmizi").string
+    route_name = soup.find("span", class_="kirmizi").text.strip()
     #TODO: also get stop names in case they are not on map
     return going, coming, route_name
 
@@ -125,10 +129,12 @@ def generate(filename):
                 stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = schedule.AddStop(
                     lng=stop[2], lat=stop[3], name=stop[0])
 
-    for route_code in route_codes:
-        timetable = _get_timetable(route_code)
-        stop_order = _get_stop_order(route_code)
-
+    timetable_list = pool.map(_get_timetable, route_codes)
+    stop_order_list = pool.map(_get_stop_order, route_codes)
+    for route_code, timetable, stop_order in zip(route_codes, timetable_list, stop_order_list):
+        if not stop_order[0]:
+            #that route doesn't have any stops!
+            continue
         route = schedule.AddRoute(
             short_name=route_code, long_name=stop_order[2], route_type="Bus")
         trip = route.AddTrip(
