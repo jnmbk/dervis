@@ -146,19 +146,19 @@ def generate(filename):
                 finally:
                     for time in timetable[0]:
                         trip.AddStopTime(stop, stop_time=time)
-        if stop_order[1]:
+        if stop_order[1] and stop_cache.has_key(stop_order[1][-1]):
             trip = route.AddTrip(
                 schedule, headsign=stop_cache[stop_order[1][-1]][0])
-        for order, stop_key in enumerate(stop_order[1]):
-            if order==0:
-                try:
-                    stop = stop_cache[stop_key]
-                except KeyError:
-                    #TODO: try to calculate a possible position between other stops
-                    continue
-                finally:
-                    for time in timetable[1]:
-                        trip.AddStopTime(stop, stop_time=time)
+            for order, stop_key in enumerate(stop_order[1]):
+                if order==0:
+                    try:
+                        stop = stop_cache[stop_key]
+                    except KeyError:
+                        #TODO: try to calculate a possible position between other stops
+                        continue
+                    finally:
+                        for time in timetable[1]:
+                            trip.AddStopTime(stop, stop_time=time)
 
     schedule.Validate()
     schedule.WriteGoogleTransitFeed(filename)
