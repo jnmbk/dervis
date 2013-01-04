@@ -45,8 +45,44 @@ def _get_stops(route_code):
 
 def _get_timetable(route_code):
     soup =  BeautifulSoup(url_cache.urlopen(_timetable_url % route_code))
-    #TODO: parse soup
-    return soup
+    try:
+        name = soup.b.text
+    except AttributeError:
+        name = ''
+    duration = [int(s) for s in soup.center.text.split() if s.isdigit()][-1]
+
+    weekdays_g=[]
+    weekdays_d=[]
+    sat_g=[]
+    sat_d=[]
+    sun_g=[]
+    sun_d=[]
+
+    for times in soup.find_all("tr")[4:]:
+        for counter, time in enumerate(times.find_all("td")):
+            text = time.text.strip()
+            if text:
+                i = text.find(':')
+                text = text[i-2:i+3] + ":00"
+                if counter == 0: weekdays_g.append(text)
+                if counter == 1: weekdays_d.append(text)
+                if counter == 2: sat_g.append(text)
+                if counter == 3: sat_d.append(text)
+                if counter == 4: sun_g.append(text)
+                if counter == 5: sun_d.append(text)
+
+    #recalculate hours, they should be like 23, 24, 25...
+    for i in range(len(weekdays_d) - 1):
+        if weekdays_d[i] > weekdays_d[i+1]:
+            hour = int(weekdays_d[i+1][:2]) + 24
+            weekdays_d[i+1] = str(hour) + weekdays_d[i+1][2:]
+
+    for i in range(len(weekdays_g) - 1):
+        if weekdays_g[i] > weekdays_g[i + 1]:
+            hour = int(weekdays_g[i + 1][:2]) + 24
+            weekdays_g[i + 1] = str(hour) + weekdays_g[i + 1][2:]
+
+    return weekdays_d, weekdays_g, sat_d, sat_g, sun_d, sun_g, name, duration
 
 def _get_stop_order(route_code):
     soup = BeautifulSoup(url_cache.urlopen(_stop_order_url % route_code))
@@ -74,7 +110,8 @@ def generate(filename):
 
     service_period = schedule.GetDefaultServicePeriod()
     service_period.SetWeekdayService(True)
-    service_period.SetDateHasService('20070704')
+    service_period.SetStartDate('20130101')
+    service_period.SetEndDate('20131231')
 
     route_codes = _get_route_codes()
     stop_cache = {}
@@ -82,7 +119,7 @@ def generate(filename):
         stops = _get_stops(route_code)
         for stop in stops:
             if not stop[1] in stop_cache.keys():
-                stop_cache[stop[1]] = schedule.AddStop(
+                stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = schedule.AddStop(
                     lng=stop[2], lat=stop[3], name=stop[0])
 
     for route_code in route_codes:
@@ -93,44 +130,35 @@ def generate(filename):
             short_name=route_code, long_name=stop_order[2], route_type="Bus")
         trip = route.AddTrip(
             schedule, headsign=stop_cache[stop_order[0][-1]][0])
-        for stop_key in stop_order[0]:
-            try:
-                stop = stop_cache[stop_key]
-            except KeyError:
-                # ok, lazy iett guys didn't add this stop to the map
-                #TODO: try to calculate a possible position between other stops
-#                previous_stop = stop_cache[stop_key]
-#                stop_cache[stop_key] = schedule.AddStop(
-#                    lng=previous_stop.stop_lng, lat=previous_stop.stop_lat, name=stop_key)
-#                stop = stop_cache[stop_key]
-                continue
-            finally:
-                trip.AddStopTime(stop, stop_time='09:00:00')
+
+        for order, stop_key in enumerate(stop_order[0]):
+            if order == 0:
+                try:
+                    stop = stop_cache[stop_key]
+                except KeyError:
+                    # ok, lazy iett guys didn't add this stop to the map
+                    #TODO: try to calculate a possible position between other stops
+    #                previous_stop = stop_cache[stop_key]
+    #                stop_cache[stop_key] = schedule.AddStop(
+    #                    lng=previous_stop.stop_lng, lat=previous_stop.stop_lat, name=stop_key)
+    #                stop = stop_cache[stop_key]
+                    continue
+                finally:
+                    for time in timetable[0]:
+                        trip.AddStopTime(stop, stop_time=time)
         if stop_order[1]:
             trip = route.AddTrip(
                 schedule, headsign=stop_cache[stop_order[1][-1]][0])
-        for stop_key in stop_order[1]:
-            try:
-                stop = stop_cache[stop_key]
-            except KeyError:
-                #TODO: try to calculate a possible position between other stops
-                continue
-            finally:
-                trip.AddStopTime(stop, stop_time='09:00:00')
-
-    stop1 = schedule.AddStop(lng=-122, lat=37.2, name="Suburbia")
-    stop2 = schedule.AddStop(lng=-122.001, lat=37.201, name="Civic Center")
-
-    route = schedule.AddRoute(short_name="22", long_name="Civic Center Express",
-        route_type="Bus")
-
-    trip = route.AddTrip(schedule, headsign="To Downtown")
-    trip.AddStopTime(stop1, stop_time='09:00:00')
-    trip.AddStopTime(stop2, stop_time='09:15:00')
-
-    trip = route.AddTrip(schedule, headsign="To Suburbia")
-    trip.AddStopTime(stop1, stop_time='17:30:00')
-    trip.AddStopTime(stop2, stop_time='17:45:00')
+        for order, stop_key in enumerate(stop_order[1]):
+            if order==0:
+                try:
+                    stop = stop_cache[stop_key]
+                except KeyError:
+                    #TODO: try to calculate a possible position between other stops
+                    continue
+                finally:
+                    for time in timetable[1]:
+                        trip.AddStopTime(stop, stop_time=time)
 
     schedule.Validate()
     schedule.WriteGoogleTransitFeed(filename)
