@@ -18,12 +18,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 from multiprocessing import Pool
 import re
 from bs4 import BeautifulSoup
-import transitfeed
-from dervis import url_cache
+import requests
+import requests_cache
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from dervis.database import Base, Stop
 
-_base_url = "http://harita.iett.gov.tr"
+requests_cache.install_cache('dervis')
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.22'
+                  ' (KHTML, like Gecko) Chrome/25.0.1364.172 Safari/537.22',
+}
+
+_base_url = "http://harita.iett.gov.tr/yeni"
 _timetable_url = _base_url + "/saat.php?hat=%s"
-_stop_url = _base_url + "/XML/%shatDurak.xml"
+_stop_url = _base_url + "/geoRss.php3?hat=%s"
 _stop_order_url = _base_url + "/hat_sorgula_v3.php3?sorgu=durak&hat=%s"
 
 # note that I can also get current bus locations from:
@@ -35,17 +44,17 @@ _stop_order_url = _base_url + "/hat_sorgula_v3.php3?sorgu=durak&hat=%s"
 # "/durak_saat_v3.php3?sorgu=saat&hat=%s&durak=A0083&yon=G"
 
 def _get_route_codes():
-    soup = BeautifulSoup(url_cache.urlopen(_base_url))
+    soup = BeautifulSoup(requests.get("http://harita.iett.gov.tr/yeni/", headers=headers).text)
     return [i["value"] for i in soup.find(id="hat").findAll("option")[1:]]
 
 def _get_stops(route_code):
-    soup =  BeautifulSoup(url_cache.urlopen(_stop_url % route_code))
+    soup = BeautifulSoup(requests.get(_stop_url % route_code, headers=headers).text)
     return [(
         i.title.text, i.description.string.split('aaa')[0],
         i.find('geo:long').text, i.find('geo:lat').text) for i in soup.findAll("item")]
 
 def _get_timetable(route_code):
-    soup =  BeautifulSoup(url_cache.urlopen(_timetable_url % route_code))
+    soup = BeautifulSoup(requests.get(_timetable_url % route_code, headers=headers).text)
     try:
         name = soup.b.text
         duration = [int(s) for s in soup.center.text.split() if s.isdigit()][-1]
@@ -90,7 +99,7 @@ def _get_timetable(route_code):
     return weekdays_d, weekdays_g, sat_d, sat_g, sun_d, sun_g, name, duration
 
 def _get_stop_order(route_code):
-    soup = BeautifulSoup(url_cache.urlopen(_stop_order_url % route_code))
+    soup = BeautifulSoup(requests.get(_stop_order_url % route_code, headers=headers).text)
     # get stops for going and coming directions
     going = []
     for i in soup.find_all('a', href=re.compile(r".*\byon=G\b.*")):
@@ -108,17 +117,14 @@ def _get_stop_order(route_code):
     #TODO: also get stop names in case they are not on map
     return going, coming, route_name
 
-def generate(filename):
-    schedule = transitfeed.Schedule()
 
-    schedule.AddAgency("IETT", "http://www.iett.gov.tr", "Europe/Istanbul")
+def generate(filename, route_limit=1000):
+    engine = create_engine('sqlite:///%s' % filename, echo=True)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
 
-    service_period = schedule.GetDefaultServicePeriod()
-    service_period.SetWeekdayService(True)
-    service_period.SetStartDate('20130101')
-    service_period.SetEndDate('20131231')
-
-    route_codes = _get_route_codes()
+    route_codes = _get_route_codes()[:route_limit]
     pool = Pool()
     stops_list = pool.map(_get_stops, route_codes)
 
@@ -126,48 +132,48 @@ def generate(filename):
     for route_code, stops in zip(route_codes, stops_list):
         for stop in stops:
             if not stop[1] in stop_cache.keys():
-                stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = schedule.AddStop(
-                    lng=stop[2], lat=stop[3], name=stop[0])
+                stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = Stop(
+                    stop[1], stop[0], stop[3], stop[2])
 
-    timetable_list = pool.map(_get_timetable, route_codes)
-    stop_order_list = pool.map(_get_stop_order, route_codes)
-    for route_code, timetable, stop_order in zip(route_codes, timetable_list, stop_order_list):
-        if not stop_order[0]:
-            #that route doesn't have any stops!
-            continue
-        route = schedule.AddRoute(
-            short_name=route_code, long_name=stop_order[2], route_type="Bus")
-        trip = route.AddTrip(
-            schedule, headsign=stop_cache[stop_order[0][-1]][0])
+    session.add_all(stop_cache.values())
+    session.commit()
 
-        for order, stop_key in enumerate(stop_order[0]):
-            if order == 0:
-                try:
-                    stop = stop_cache[stop_key]
-                except KeyError:
-                    # ok, lazy iett guys didn't add this stop to the map
-                    #TODO: try to calculate a possible position between other stops
-    #                previous_stop = stop_cache[stop_key]
-    #                stop_cache[stop_key] = schedule.AddStop(
-    #                    lng=previous_stop.stop_lng, lat=previous_stop.stop_lat, name=stop_key)
-    #                stop = stop_cache[stop_key]
-                    continue
-                finally:
-                    for time in timetable[0]:
-                        trip.AddStopTime(stop, stop_time=time)
-        if stop_order[1] and stop_cache.has_key(stop_order[1][-1]):
-            trip = route.AddTrip(
-                schedule, headsign=stop_cache[stop_order[1][-1]][0])
-            for order, stop_key in enumerate(stop_order[1]):
-                if order==0:
-                    try:
-                        stop = stop_cache[stop_key]
-                    except KeyError:
-                        #TODO: try to calculate a possible position between other stops
-                        continue
-                    finally:
-                        for time in timetable[1]:
-                            trip.AddStopTime(stop, stop_time=time)
-
-    schedule.Validate()
-    schedule.WriteGoogleTransitFeed(filename)
+    # timetable_list = pool.map(_get_timetable, route_codes)
+    # stop_order_list = pool.map(_get_stop_order, route_codes)
+    # for route_code, timetable, stop_order in zip(route_codes, timetable_list, stop_order_list):
+    #     if not stop_order[0]:
+    #         #that route doesn't have any stops!
+    #         continue
+    #     route = schedule.AddRoute(
+    #         short_name=route_code, long_name=stop_order[2], route_type="Bus")
+    #     trip = route.AddTrip(
+    #         schedule, headsign=stop_cache[stop_order[0][-1]][0])
+    #
+    #     for order, stop_key in enumerate(stop_order[0]):
+    #         if order == 0:
+    #             try:
+    #                 stop = stop_cache[stop_key]
+    #             except KeyError:
+    #                 # ok, lazy iett guys didn't add this stop to the map
+    #                 #TODO: try to calculate a possible position between other stops
+    # #                previous_stop = stop_cache[stop_key]
+    # #                stop_cache[stop_key] = schedule.AddStop(
+    # #                    lng=previous_stop.stop_lng, lat=previous_stop.stop_lat, name=stop_key)
+    # #                stop = stop_cache[stop_key]
+    #                 continue
+    #             finally:
+    #                 for time in timetable[0]:
+    #                     trip.AddStopTime(stop, stop_time=time)
+    #     if stop_order[1] and stop_cache.has_key(stop_order[1][-1]):
+    #         trip = route.AddTrip(
+    #             schedule, headsign=stop_cache[stop_order[1][-1]][0])
+    #         for order, stop_key in enumerate(stop_order[1]):
+    #             if order==0:
+    #                 try:
+    #                     stop = stop_cache[stop_key]
+    #                 except KeyError:
+    #                     #TODO: try to calculate a possible position between other stops
+    #                     continue
+    #                 finally:
+    #                     for time in timetable[1]:
+    #                         trip.AddStopTime(stop, stop_time=time)

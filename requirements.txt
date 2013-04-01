@@ -1,3 +1,4 @@
-transitfeed
 beautifulsoup4
 requests
+requests-cache
+sqlalchemy

@@ -15,18 +15,23 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
-from StringIO import StringIO
-from time import sleep
-import os
-import unittest
-from dervis import iett
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
 
 
-class TestGtfsGenerators(unittest.TestCase):
-    test_file = "test.sqlite3"
+Base = declarative_base()
 
-    def test_generate_iett(self):
-        iett.generate(self.test_file, 20)
 
-if __name__ == "__main__":
-    unittest.main()
+class Stop(Base):
+    __tablename__ = 'stops'
+
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    lat = Column(String)
+    lng = Column(String)
+
+    def __init__(self, id, name, lat, lng):
+        self.id, self.name, self.lat, self.lng = id, name, lat, lng
+
+    def __repr__(self):
+        return "<Stop('%s')>" % self.name
