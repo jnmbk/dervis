@@ -15,7 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 """
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Numeric, Unicode
 from sqlalchemy.ext.declarative import declarative_base
 
 
@@ -25,10 +25,10 @@ Base = declarative_base()
 class Stop(Base):
     __tablename__ = 'stops'
 
-    id = Column(String, primary_key=True)
-    name = Column(String)
-    lat = Column(String)
-    lng = Column(String)
+    id = Column(Unicode, primary_key=True)
+    name = Column(Unicode)
+    lat = Column(Numeric)
+    lng = Column(Numeric)
 
     def __init__(self, id, name, lat, lng):
         self.id, self.name, self.lat, self.lng = id, name, lat, lng
