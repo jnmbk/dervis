@@ -18,11 +18,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 from multiprocessing import Pool
 import re
 from bs4 import BeautifulSoup
+from pyproj import Proj, transform
 import requests
 import requests_cache
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from dervis.database import Base, Stop
+
 
 requests_cache.install_cache('dervis')
 headers = {
@@ -47,11 +49,16 @@ def _get_route_codes():
     soup = BeautifulSoup(requests.get("http://harita.iett.gov.tr/yeni/", headers=headers).text)
     return [i["value"] for i in soup.find(id="hat").findAll("option")[1:]]
 
+projection = Proj(init="EPSG:3857")
+def _convert_to_real_lat_lng(lng, lat):
+    return projection(lng, lat, inverse=True)
+
 def _get_stops(route_code):
     soup = BeautifulSoup(requests.get(_stop_url % route_code, headers=headers).text)
     return [(
         i.title.text, i.description.string.split('aaa')[0],
-        i.find('geo:long').text, i.find('geo:lat').text) for i in soup.findAll("item")]
+        _convert_to_real_lat_lng(i.find('geo:long').text,
+        i.find('geo:lat').text)) for i in soup.findAll("item")]
 
 def _get_timetable(route_code):
     soup = BeautifulSoup(requests.get(_timetable_url % route_code, headers=headers).text)
@@ -133,7 +140,7 @@ def generate(filename, route_limit=1000):
         for stop in stops:
             if not stop[1] in stop_cache.keys():
                 stop_cache[stop[1].replace(u'Ş', "S:").replace(u'İ', "I:")] = Stop(
-                    stop[1], stop[0], stop[3], stop[2])
+                    stop[1], stop[0], stop[2][1], stop[2][0])
 
     session.add_all(stop_cache.values())
     session.commit()
